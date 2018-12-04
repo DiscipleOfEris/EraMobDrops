@@ -1,7 +1,7 @@
 _addon.name = 'EraMobDrops'
 _addon.author = 'DiscipleOfEris'
-_addon.version = '1.0.0'
-_addon.commands = {'eramobdrops', 'emd'}
+_addon.version = '1.1.0'
+_addon.commands = {'mobdrops', 'drops'}
 
 config = require('config')
 texts = require('texts')
@@ -10,8 +10,9 @@ res = require('resources')
 require('sqlite3')
 
 defaults = {}
-defaults.header = "${name} (Lv.${lvl_min}-${lvl_max}, Respawn: ${respawn}s)"
+defaults.header = "${name} (Lv.${lvl}, Respawn: ${respawn})"
 defaults.noDrops = "No Drops"
+defaults.Steal = "${item.name}"
 defaults.display = {}
 defaults.display.pos = {}
 defaults.display.pos.x = 0
@@ -41,13 +42,22 @@ local dropKeys = {'drop_id', 'drop_type', 'item_id', 'item_rate'}
 
 DROP_TYPE = { NORMAL=0x0, GROUPED=0x1, STEAL=0x2, DESPOIL=0x4 }
 
+TH_lvl = 0
+prev_TH_lvl = 0
+prevMouse = {x=-1,y=-1}
+CLICK_DISTANCE = 2.0^2
+
+prev_target_id = -1
+
 windower.register_event('load',function()
   db = sqlite3.open(windower.addon_path..'/mobs_drops.db', sqlite3.OPEN_READONLY)
   
   if not windower.ffxi.get_info().logged_in then return end
   
-  local target = windower.ffxi.get_mob_by_target('st') or windower.ffxi.get_mob_by_target('t') or windower.ffxi.get_player()
-  info = getTargetInfo(target)
+  local player = windower.ffxi.get_player()
+  local target = windower.ffxi.get_mob_by_target('st') or windower.ffxi.get_mob_by_target('t') or player
+  local info = getTargetInfo(target)
+
   updateInfo(info)
 end)
 
@@ -55,17 +65,61 @@ windower.register_event('unload', function()
   db:close()
 end)
 
-windower.register_event('target change', function(index)
+windower.register_event('mouse', function(type, x, y, delta, blocked)
+  if not box:hover(x,y) or type == 0 then return end
+
+  mouse = {x=x,y=y}
+  clicked = false
+  
+  --windower.add_to_chat(0, tostring(type)..': '..x..','..y..' delta: '..delta..' blocked: '..tostring(blocked))
+  
+  if type == 1 then
+    prevMouse = mouse
+  elseif type == 2 and distanceSquared(mouse, prevMouse) < CLICK_DISTANCE then
+    -- left clicked
+    TH_lvl = TH_lvl + 1
+    clicked = true
+  elseif type == 4 then
+    prevMouse = mouse
+  elseif type == 5 and distanceSquared(mouse, prevMouse) < CLICK_DISTANCE then
+    -- right clicked
+    TH_lvl = TH_lvl - 1
+    clicked = true
+  elseif type == 7 then
+    prevMouse = mouse
+  elseif type == 8 and distanceSquared(mouse, prevMouse) < CLICK_DISTANCE then
+    -- middle clicked
+    TH_lvl = TH_lvl - 1
+    clicked = true
+  elseif delta > 0 then
+    -- scrolled up
+  elseif delta < 0 then
+    -- scrolled down
+  end
+  
+  if TH_lvl < 0 then TH_lvl = 0 end
+  if TH_lvl > 10 then TH_lvl = 10 end
+  
+  return true
+end)
+
+windower.register_event('prerender', function()
   local player = windower.ffxi.get_player()
   local target = windower.ffxi.get_mob_by_target('st') or windower.ffxi.get_mob_by_target('t') or player
+
+  if ((target and target.id) or -1) == prev_target_id and TH_lvl == prev_TH_lvl then return end
+  prev_target_id = (target and target.id) or -1
+  prev_TH_lvl = TH_lvl
   
-  info = getTargetInfo(target)
+  local info = getTargetInfo(target)
   updateInfo(info)
 end)
 
 function getTargetInfo(target)
   local info = {}
 
+  if target == nil then return {type='none'} end
+  
   if target.spawn_type == 16 then
     local zone_id = windower.ffxi.get_info().zone
     local mob, drops = getMobInfo(target, zone_id)
@@ -95,6 +149,7 @@ end
 
 function updateInfo(info)
   if info.type ~= 'mob' then
+    prev_target_id = 0
     box:text('')
     box:visible(false)
     return
@@ -104,10 +159,11 @@ function updateInfo(info)
   local lines = {}
   local drops = info and info.drops or {}
   for _, drop in pairs(drops) do
-    if not (testflag(drop.drop_type, DROP_TYPE.STEAL) or testflag(drop.drop_type, DROP_TYPE.DESPOIL)) then
-      table.insert(lines, items[drop.item_id].en..': '..(drop.item_rate/10)..'%')
-    elseif testflag(drop.drop_type, DROP_TYPE.STEAL) then
+    if testflag(drop.drop_type, DROP_TYPE.STEAL) then
       steal = steal..'Steal: '..items[drop.item_id].en..'\n'
+    else
+      rate = applyTH(drop.item_rate)
+      table.insert(lines, items[drop.item_id].en..string.format(': %.1f%%', rate/10))
     end
   end
   
@@ -120,7 +176,15 @@ function updateInfo(info)
     box:text(header..settings.noDrops)
   end
   
-  box:update(info.mob)
+  update = table.update({TH=TH_lvl}, info.mob)
+  update.respawn = update.respawn / 60
+  if update.respawn > 60 then
+    update.respawn = string.format('%.1fh', update.respawn/60)
+  else
+    update.respawn = string.format('%.1fm', update.respawn)
+  end
+  
+  box:update(update)
   box:visible(true)
 end
 
@@ -164,4 +228,35 @@ function kvZip(keys, values)
   end
   
   return t
+end
+
+function distanceSquared(A, B)
+  return (A.x - B.x)^2 + (A.y - B.y)^2
+end
+
+function applyTH(item_rate)
+  rate = item_rate/1000
+  
+  if TH_lvl > 2 then
+    rate = rate + (TH_lvl-2)*0.01
+  end
+  
+  if TH_lvl > 1 then
+    rate = 1-(1-rate)^3
+  elseif TH_lvl > 0 then
+    rate = 1-(1-rate)^2
+  end
+  
+  return math.min(math.floor(rate*1000),1000)
+end
+
+function dump(t)
+  for k,v in pairs(t) do
+    windower.add_to_chat(0, k..': '..tostring(v))
+    if type(v) == 'table' then
+      for k,v in pairs(t) do
+        windower.add_to_chat(0, k..': '..tostring(v))
+      end
+    end
+  end
 end
