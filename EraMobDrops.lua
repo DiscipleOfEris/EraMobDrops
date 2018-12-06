@@ -1,16 +1,19 @@
 _addon.name = 'EraMobDrops'
 _addon.author = 'DiscipleOfEris'
-_addon.version = '1.1.0'
+_addon.version = '1.2.0'
 _addon.commands = {'mobdrops', 'drops'}
 
 config = require('config')
 texts = require('texts')
 require('tables')
+require('strings')
 res = require('resources')
 require('sqlite3')
 
 defaults = {}
 defaults.header = "${name} (Lv.${lvl}, Respawn: ${respawn})"
+defaults.subheader = "TH: ${TH}"
+defaults.footer = ""
 defaults.noDrops = "No Drops"
 defaults.Steal = "${item.name}"
 defaults.display = {}
@@ -115,6 +118,59 @@ windower.register_event('prerender', function()
   updateInfo(info)
 end)
 
+windower.register_event('addon command', function(command, ...)
+  args = L{...}
+  
+  if command == "item" then
+    name = strip(args:concat(' '))
+    item = items:with('en', function(val)
+      if name == strip(val) then
+        return true
+      end
+    end)
+    
+    if item == nil then
+      windower.add_to_chat(0, 'Could not find an item with the name: '..name)
+      return
+    end
+    
+    windower.add_to_chat(0, 'Searching for mobs that drop: '..item.en)
+    
+    drops = dbGetDropsWithItem(item.id)
+    drop_ids = T{}
+    mobsProcessed = T{}
+    for _, drop in pairs(drops) do drop_ids:insert(drop.drop_id) end
+    mobs = dbGetMobsWithDrops(drop_ids)
+    for _, mob in pairs(mobs) do
+      tmp = {}
+      for _, drop in pairs(drops) do
+        if mob.drop_id == drop.drop_id then table.insert(tmp, string.format('%.1f%%', drop.item_rate/10)) end
+      end
+      mob.drops = table.concat(tmp, ', ')
+      
+      found = false
+      for _, row in pairs(mobsProcessed) do
+        if row.zone_id == mob.zone_id and row.name == mob.name and row.drops == mob.drops then
+          found = true
+          row.count = row.count + 1
+          break
+        end
+      end
+      if not found then
+        mobsProcessed:insert({zone_id=mob.zone_id, name=mob.name, drops=mob.drops, count=1})
+      end
+    end
+    
+    table.sort(mobsProcessed, function(a, b)
+      return a.zone_id < b.zone_id
+    end)
+    
+    for _, mob in pairs(mobsProcessed) do
+      windower.add_to_chat(0, ''..zones[mob.zone_id].en..': '..mob.count..' '..mob.name..': '..mob.drops)
+    end
+  end
+end)
+
 function getTargetInfo(target)
   local info = {}
 
@@ -161,22 +217,31 @@ function updateInfo(info)
   for _, drop in pairs(drops) do
     if testflag(drop.drop_type, DROP_TYPE.STEAL) then
       steal = steal..'Steal: '..items[drop.item_id].en..'\n'
+    elseif testflag(drop.drop_type, DROP_TYPE.GROUPED) then
+      rate = calculateGroupedRate(drop, drops)
+      table.insert(lines, '1: '..items[drop.item_id].en..string.format(': %.1f%%', rate/10))
     else
       rate = applyTH(drop.item_rate)
       table.insert(lines, items[drop.item_id].en..string.format(': %.1f%%', rate/10))
     end
   end
   
-  local header = ""
-  if #settings.header > 0 then header = settings.header..'\n' end
+  local str = ""
   
   if #steal > 0 or #lines > 0 then
-    box:text(header..steal..table.concat(lines, '\n'))
+    if #settings.header > 0 then str = settings.header..'\n' end
+    if #settings.subheader > 0 then str = str..settings.subheader..'\n' end
+    str = str..steal..table.concat(lines, '\n')
+    if #settings.footer > 0 then str = str..'\n'..settings.footer end
   else
-    box:text(header..settings.noDrops)
+    str = settings.noDrops
   end
   
-  update = table.update({TH=TH_lvl}, info.mob)
+  box:text(str)
+  
+  lvl = tostring(info.mob.lvl_min)
+  if info.mob.lvl_max ~= info.mob.lvl_min then lvl = lvl..'-'..tostring(info.mob.lvl_max) end
+  update = table.update({TH=TH_lvl, lvl=lvl}, info.mob)
   update.respawn = update.respawn / 60
   if update.respawn > 60 then
     update.respawn = string.format('%.1fh', update.respawn/60)
@@ -196,6 +261,53 @@ function dbGetDrops(drop_id)
   end
   
   return drops
+end
+
+function dbGetDropsWithItem(item_id)
+  local query = 'SELECT * FROM drops WHERE item_id='..item_id
+  drops = {}
+  for row in db:rows(query) do
+    table.insert(drops, kvZip(dropKeys, row))
+  end
+  
+  return drops
+end
+
+function dbGetMobsWithDrops(drop_ids)
+  local query = 'SELECT * FROM mobs WHERE drop_id IN ('..table.concat(drop_ids, ',')..')'
+  mobs = {}
+  for row in db:rows(query) do
+    table.insert(mobs, kvZip(mobKeys, row))
+  end
+  
+  return mobs
+end
+
+function applyTH(item_rate)
+  rate = item_rate/1000
+  
+  if TH_lvl > 2 then
+    rate = rate + (TH_lvl-2)*0.01
+  end
+  
+  if TH_lvl > 1 then
+    rate = 1-(1-rate)^3
+  elseif TH_lvl > 0 then
+    rate = 1-(1-rate)^2
+  end
+  
+  return math.min(math.floor(rate*1000),1000)
+end
+
+function calculateGroupedRate(drop, drops)
+  totalRate = 0
+  for i, drop2 in pairs(drops) do
+    if testflag(drop2.drop_type, DROP_TYPE.GROUPED) then
+      totalRate = totalRate + drop2.item_rate
+    end
+  end
+  
+  return drop.item_rate / totalRate * 1000
 end
 
 function values(t, keys)
@@ -234,29 +346,6 @@ function distanceSquared(A, B)
   return (A.x - B.x)^2 + (A.y - B.y)^2
 end
 
-function applyTH(item_rate)
-  rate = item_rate/1000
-  
-  if TH_lvl > 2 then
-    rate = rate + (TH_lvl-2)*0.01
-  end
-  
-  if TH_lvl > 1 then
-    rate = 1-(1-rate)^3
-  elseif TH_lvl > 0 then
-    rate = 1-(1-rate)^2
-  end
-  
-  return math.min(math.floor(rate*1000),1000)
-end
-
-function dump(t)
-  for k,v in pairs(t) do
-    windower.add_to_chat(0, k..': '..tostring(v))
-    if type(v) == 'table' then
-      for k,v in pairs(t) do
-        windower.add_to_chat(0, k..': '..tostring(v))
-      end
-    end
-  end
+function strip(str)
+  return str:lower():gsub(' ', ''):gsub('-', ''):gsub('%.', ''):gsub('\'','')
 end
