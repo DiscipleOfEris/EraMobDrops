@@ -38,7 +38,7 @@ def mob_generator():
     groups_str = file.read()
   
   with open('sql/mob_spawn_points.sql') as file:
-    mobPattern = re.compile('VALUES \((\d+), [^,]+, \'([^,]+)\', (\d+),')
+    mobPattern = re.compile('VALUES \((\d+), \'([^,]+)\', \'([^,]*)\', (\d+),')
     for line in file.readlines():
       mobMatch = mobPattern.search(line)
       #print(mobMatch)
@@ -48,8 +48,12 @@ def mob_generator():
       count += 1
       
       mob_id = mobMatch.group(1)
-      mob_name = mobMatch.group(2).replace('\\', '')
-      group_id = mobMatch.group(3)
+      alt_name = mobMatch.group(2).replace('_', ' ')
+      mob_name = mobMatch.group(3).replace('\\', '')
+      group_id = mobMatch.group(4)
+      
+      if len(mob_name) == 0:
+        mob_name = alt_name
       
       #print('searching mob_groups for', group_id)
       grpMatch = re.search('VALUES \('+group_id+', \d+, (\d+), (\d+), \d+, (\d+), \d+, \d+, (\d+), (\d+),', groups_str)
