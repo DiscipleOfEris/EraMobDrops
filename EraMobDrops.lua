@@ -1,6 +1,6 @@
 _addon.name = 'EraMobDrops'
 _addon.author = 'DiscipleOfEris'
-_addon.version = '1.3.0'
+_addon.version = '1.3.1'
 _addon.commands = {'mobdrops', 'drops'}
 
 config = require('config')
@@ -20,6 +20,7 @@ defaults.pageSize = 10
 defaults.scrollSize = 1
 defaults.scrollInvert = false
 defaults.scrollHeaders = false
+defaults.noDropsHideHeaders = false
 defaults.maxTH = 4
 defaults.display = {}
 defaults.display.pos = {}
@@ -136,19 +137,22 @@ windower.register_event('addon command', function(command, ...)
   command = command:lower()
   
   if command == "item" then
-    name = strip(args:concat(' '))
+    name = strip(windower.convert_auto_trans(args:concat(' ')))
     item = items:with('en', function(val)
-      if name == strip(val) then
-        return true
-      end
+      if name == strip(val) then return true end
     end)
+    if item == nil then
+      item = items:with('enl', function(val)
+        if name == strip(val) then return true end
+      end)
+    end
     
     if item == nil then
       windower.add_to_chat(0, 'Could not find an item with the name: '..name)
       return
     end
     
-    windower.add_to_chat(0, 'Searching for mobs that drop: '..item.en)
+    windower.add_to_chat(0, windower.to_shift_jis('Searching for mobs that drop: '..item.en))
     
     drops = dbGetDropsWithItem(item.id)
     drop_ids = T{}
@@ -158,7 +162,13 @@ windower.register_event('addon command', function(command, ...)
     for _, mob in pairs(mobs) do
       tmp = {}
       for _, drop in pairs(drops) do
-        if mob.drop_id == drop.drop_id then table.insert(tmp, string.format('%.1f%%', drop.item_rate/10)) end
+        if mob.drop_id == drop.drop_id then
+          if testflag(drop.drop_type, DROP_TYPE.STEAL) then
+            table.insert(tmp, 'Steal')
+          else
+            table.insert(tmp, string.format('%.1f%%', drop.item_rate/10))
+          end
+        end
       end
       mob.drops = table.concat(tmp, ', ')
       mob.lvl = getLevelStr(mob)
@@ -234,6 +244,7 @@ function updateInfo(info)
     return
   end
   
+  local mob = (info and info.mob) and info.mob or {}
   local steal = T{}
   local lines = T{}
   local drops = info and info.drops or {}
@@ -286,14 +297,15 @@ function updateInfo(info)
   if dropCount > 0 then
     str = lines:concat('\n')
   else
-    str = settings.noDrops
+    if settings.noDropsHideHeaders then str = settings.noDrops
+    else str = lines:concat('\n')..'\n'..settings.noDrops end
   end
   
   box:text(str)
   
-  lvl = getLevelStr(info.mob)
-  update = table.update({TH=TH_lvl, lvl=lvl}, info.mob)
-  update.respawn = update.respawn / 60
+  lvl = mob.lvl_min and getLevelStr(mob) or '?'
+  update = table.update({TH=TH_lvl, lvl=lvl}, mob)
+  update.respawn = update.respawn and (update.respawn / 60) or 0
   if update.respawn > 60 then
     update.respawn = string.format('%.1fh', update.respawn/60)
   else
@@ -431,7 +443,7 @@ function distanceSquared(A, B)
 end
 
 function strip(str)
-  return str:lower():gsub(' ',''):gsub('-',''):gsub('%.',''):gsub('\'',''):gsub(':','')
+  return str:lower():gsub(' ',''):gsub('-',''):gsub('%.',''):gsub('\'',''):gsub(':',''):gsub('"',''):gsub('♂','m'):gsub('♀','f'):gsub('%(',''):gsub('%)',''):gsub('♪','')
 end
 
 function getLevelStr(mob)
