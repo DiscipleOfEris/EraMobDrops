@@ -7,28 +7,31 @@ cur = con.cursor()
 
 cur.executescript('''
 DROP TABLE IF EXISTS mobs;
-DROP INDEX IF EXISTS mobs_drop_id;
+DROP INDEX IF EXISTS idx_mobs_dropid;
+DROP INDEX IF EXISTS idx_mobs_mobiname_zone_drop;
 CREATE TABLE mobs (
   mob_id INTEGER,
   mob_name TEXT,
+  mob_iname TEXT,
   zone_id INTEGER,
   drop_id INTEGER,
   respawn INTEGER,
   lvl_min INTEGER,
   lvl_max INTEGER,
   PRIMARY KEY (mob_id));
-CREATE INDEX mobs_drops_id on mobs(drop_id)''')
+CREATE INDEX idx_mobs_dropsid on mobs(drop_id);
+CREATE INDEX idx_mobs_mobiname_zone_drop on mobs(mob_iname, zone_id, drop_id);''')
 cur.executescript('''
 DROP TABLE IF EXISTS drops;
-DROP INDEX IF EXISTS drops_drop_id;
-DROP INDEX IF EXISTS drops_item_id;
+DROP INDEX IF EXISTS idx_drops_dropid;
+DROP INDEX IF EXISTS idx_drops_itemid;
 CREATE TABLE drops (
   drop_id INTEGER,
   drop_type INTEGER,
   item_id INTEGER,
   item_rate INTEGER);
-CREATE INDEX idx_drops_drop_id ON drops(drop_id);
-CREATE INDEX idx_drops_item_id ON drops(item_id);''')
+CREATE INDEX idx_drops_dropid ON drops(drop_id);
+CREATE INDEX idx_drops_itemid ON drops(item_id);''')
 
 con.commit()
 
@@ -50,6 +53,7 @@ def mob_generator():
       mob_id = mobMatch.group(1)
       alt_name = mobMatch.group(2).replace('_', ' ')
       mob_name = mobMatch.group(3).replace('\\', '')
+      mob_iname = re.sub('[\'\"\-\(\)\,\. ]', '', mob_name.lower())
       group_id = mobMatch.group(4)
       
       if len(mob_name) == 0:
@@ -68,11 +72,11 @@ def mob_generator():
       lvl_min = grpMatch.group(4)
       lvl_max = grpMatch.group(5)
       
-      if count % 1000 == 0: print(count, 'mob:', mob_id, mob_name, zone_id, drop_id, respawn, lvl_min, lvl_max)
+      if count % 1000 == 0: print(count, 'mob:', mob_id, mob_name, mob_iname, zone_id, drop_id, respawn, lvl_min, lvl_max)
       
-      yield (mob_id, mob_name, zone_id, drop_id, respawn, lvl_min, lvl_max)
+      yield (mob_id, mob_name, mob_iname, zone_id, drop_id, respawn, lvl_min, lvl_max)
 
-cur.executemany('INSERT INTO mobs (mob_id, mob_name, zone_id, drop_id, respawn, lvl_min, lvl_max) VALUES (?, ?, ?, ?, ?, ?, ?)', mob_generator())
+cur.executemany('INSERT INTO mobs (mob_id, mob_name, mob_iname, zone_id, drop_id, respawn, lvl_min, lvl_max) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', mob_generator())
 
 con.commit()
 

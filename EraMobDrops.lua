@@ -1,6 +1,6 @@
 _addon.name = 'EraMobDrops'
 _addon.author = 'DiscipleOfEris'
-_addon.version = '1.3.1'
+_addon.version = '1.4.0'
 _addon.commands = {'mobdrops', 'drops'}
 
 config = require('config')
@@ -8,6 +8,7 @@ texts = require('texts')
 require('tables')
 require('strings')
 res = require('resources')
+require('logger')
 require('sqlite3')
 
 defaults = {}
@@ -46,7 +47,7 @@ box = texts.new("", settings.display, settings)
 zones = res.zones
 items = res.items
 
-local mobKeys = {'mob_id', 'name', 'zone_id', 'drop_id', 'respawn', 'lvl_min', 'lvl_max'}
+local mobKeys = {'mob_id', 'name', 'iname', 'zone_id', 'drop_id', 'respawn', 'lvl_min', 'lvl_max'}
 local dropKeys = {'drop_id', 'drop_type', 'item_id', 'item_rate'}
 
 DROP_TYPE = { NORMAL=0x0, GROUPED=0x1, STEAL=0x2, DESPOIL=0x4 }
@@ -84,25 +85,25 @@ windower.register_event('mouse', function(type, x, y, delta, blocked)
   mouse = {x=x,y=y}
   clicked = false
   
-  --windower.add_to_chat(0, tostring(type)..': '..x..','..y..' delta: '..delta..' blocked: '..tostring(blocked))
+  --log(tostring(type)..': '..x..','..y..' delta: '..delta..' blocked: '..tostring(blocked))
   
   if type == 1 then
     prevMouse = mouse
   elseif type == 2 and distanceSquared(mouse, prevMouse) < CLICK_DISTANCE then
     -- left clicked
-    if setTH(TH_lvl+1) then windower.add_to_chat(0, 'Setting TH level: '..tostring(TH_lvl)) end
+    if setTH(TH_lvl+1) then log('Setting TH level: '..tostring(TH_lvl)) end
     clicked = true
   elseif type == 4 then
     prevMouse = mouse
   elseif type == 5 and distanceSquared(mouse, prevMouse) < CLICK_DISTANCE then
     -- right clicked
-    if setTH(TH_lvl-1) then windower.add_to_chat(0, 'Setting TH level: '..tostring(TH_lvl)) end
+    if setTH(TH_lvl-1) then log('Setting TH level: '..tostring(TH_lvl)) end
     clicked = true
   elseif type == 7 then
     prevMouse = mouse
   elseif type == 8 and distanceSquared(mouse, prevMouse) < CLICK_DISTANCE then
     -- middle clicked
-    if setTH(TH_lvl-1) then windower.add_to_chat(0, 'Setting TH level: '..tostring(TH_lvl)) end
+    if setTH(TH_lvl-1) then log('Setting TH level: '..tostring(TH_lvl)) end
     clicked = true
   elseif delta > 0 then
     -- scrolled up
@@ -148,11 +149,11 @@ windower.register_event('addon command', function(command, ...)
     end
     
     if item == nil then
-      windower.add_to_chat(0, 'Could not find an item with the name: '..name)
+      log('Could not find an item with the name: '..name)
       return
     end
     
-    windower.add_to_chat(0, windower.to_shift_jis('Searching for mobs that drop: '..item.en))
+    log(windower.to_shift_jis('Searching for mobs that drop: '..item.en))
     
     drops = dbGetDropsWithItem(item.id)
     drop_ids = T{}
@@ -191,12 +192,66 @@ windower.register_event('addon command', function(command, ...)
     end)
     
     for _, mob in pairs(mobsProcessed) do
-      windower.add_to_chat(0, '%s: %s %s (Lv.%s): %s':format(zones[mob.zone_id].en, mob.count, mob.name, mob.lvl, mob.drops))
+      log('%s: %s %s (Lv.%s): %s':format(zones[mob.zone_id].en, mob.count, mob.name, mob.lvl, mob.drops))
+    end
+  elseif command == "mob" then
+    local name = strip(windower.convert_auto_trans(args:concat(' ')))
+    
+    local mobs = dbGetMobsWithName(name)
+    local drop_ids = T{}
+    local mobsProcessed = T{}
+    for _, mob in ipairs(mobs) do
+      mob.lvl = getLevelStr(mob)
+      
+      local found = false
+      for _, row in ipairs(mobsProcessed) do
+        if row.zone_id == mob.zone_id and row.name == mob.name and row.drop_id == mob.drop_id and row.lvl == mob.lvl then
+          found = true
+          row.count = row.count + 1
+          break
+        end
+      end
+      if not found then
+        mobsProcessed:insert({name=mob.name, zone_id=mob.zone_id, drop_id=mob.drop_id, lvl=mob.lvl, count=1})
+        if not drop_ids:contains(mob.drop_id) then drop_ids:insert(mob.drop_id) end
+      end
+    end
+    
+    for _, drop_id in ipairs(drop_ids) do
+      local drops = dbGetDrops(drop_id)
+      local tmp = T{}
+      for _, drop in ipairs(drops) do
+        drop.item_name = items[drop.item_id].en
+        
+        if testflag(drop.drop_type, DROP_TYPE.STEAL) then
+          tmp:insert('%s (Steal)':format(drop.item_name))
+        else
+          tmp:insert('%s %.1f%%':format(drop.item_name, drop.item_rate/10))
+        end
+      end
+      
+      local dropStr = tmp:concat(', ')
+      for _, mob in ipairs(mobsProcessed) do
+        if mob.drop_id == drop_id then
+          mob.drops = drops
+          mob.dropStr = dropStr
+        end
+      end
+    end
+    
+    if #mobsProcessed == 0 then
+      log('No mobs found with that name.')
+    else
+      log('Results for %s:':format(mobsProcessed[1].name))
+    end
+    
+    for _, mob in ipairs(mobsProcessed) do
+      log('%s (%s Lv.%s): %s':format(zones[mob.zone_id].en, mob.count, mob.lvl, mob.dropStr))
     end
   elseif command == "th+" then
-    if setTH(TH_lvl+1) then windower.add_to_chat(0, 'Setting TH level: '..tostring(TH_lvl)) end
+    if setTH(TH_lvl+1) then log('Setting TH level: '..tostring(TH_lvl)) end
   elseif command == "th-" then
-    if setTH(TH_lvl-1) then windower.add_to_chat(0, 'Setting TH level: '..tostring(TH_lvl)) end
+    if setTH(TH_lvl-1) then log('Setting TH level: '..tostring(TH_lvl)) end
   elseif command == "page" or command == "pagesize" then
     settings.pageSize = tonumber(args[1])
     config.save(settings)
@@ -339,6 +394,17 @@ end
 function dbGetMobsWithDrops(drop_ids)
   local query = 'SELECT * FROM mobs WHERE drop_id IN ('..table.concat(drop_ids, ',')..')'
   mobs = {}
+  for row in db:rows(query) do
+    table.insert(mobs, kvZip(mobKeys, row))
+  end
+  
+  return mobs
+end
+
+function dbGetMobsWithName(name)
+  name = strip(name)
+  local query = 'SELECT * FROM mobs WHERE mob_iname="'..name..'" ORDER BY zone_id, drop_id'
+  local mobs = {}
   for row in db:rows(query) do
     table.insert(mobs, kvZip(mobKeys, row))
   end

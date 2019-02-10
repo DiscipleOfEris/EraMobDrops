@@ -15,7 +15,8 @@ Once the addon is in your Windower addons folder, it won't show up in the Window
 
 You can use either `//mobdrops` or `//drops`. Note that you can relocate the drops textbox by dragging and dropping with your mouse.
 
-    //drops item <item_name> -- Will search for all mobs that drop the specified item and display those drop chances.  
+    //drops item <item_name> -- Will show the drop chances for all mobs that drop the specified item.  
+    //drops mob <mob_name> -- Will show the drops of all mobs with that name.  
     //drops th+ -- Increase TH calculator level. Left click does the same.  
     //drops th- -- Decrease TH calculator level. Middle/right click does the same.  
     //drops page <size> -- Set the page size. Scroll with the mouse wheel.
