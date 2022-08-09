@@ -1,6 +1,6 @@
 _addon.name = 'EraMobDrops'
 _addon.author = 'DiscipleOfEris'
-_addon.version = '1.4.0'
+_addon.version = '1.5.0'
 _addon.commands = {'mobdrops', 'drops'}
 
 config = require('config')
@@ -264,13 +264,15 @@ function getTargetInfo(target)
 
   if target == nil then return {type='none'} end
   
-  if target.spawn_type == 16 then
+  if target.index < 1024 then
     local zone_id = windower.ffxi.get_info().zone
     local mob, drops = getMobInfo(target, zone_id)
     
-    info.type = 'mob'
-    info.mob = mob
-    info.drops = drops
+    if mob then
+      info.type = 'mob'
+      info.mob = mob
+      info.drops = drops
+    end
   end
   
   return info
