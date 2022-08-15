@@ -87,49 +87,6 @@ def mob_generator():
       
     yield (row['mobid'], mob_name, mob_iname, row['zoneid'], row['dropid'], row['respawntime'], row['minLevel'], row['maxLevel'])
 
-'''
-def mob_generator2():
-  count = 0
-  with open('sql/mob_groups.sql') as file:
-    groups_str = file.read()
-  
-  with open('sql/mob_spawn_points.sql') as file:
-    mobPattern = re.compile('VALUES \((\d+), \'([^,]+)\', \'([^,]*)\', (\d+),')
-    for line in file.readlines():
-      mobMatch = mobPattern.search(line)
-      #print(mobMatch)
-      if not mobMatch:
-        continue
-      
-      count += 1
-      
-      mob_id = mobMatch.group(1)
-      alt_name = mobMatch.group(2).replace('_', ' ')
-      mob_name = mobMatch.group(3).replace('\\', '')
-      mob_iname = re.sub('[\'\"\-\(\)\,\. ]', '', mob_name.lower())
-      group_id = mobMatch.group(4)
-      
-      if len(mob_name) == 0:
-        mob_name = alt_name
-      
-      #print('searching mob_groups for', group_id)
-      grpMatch = re.search('VALUES \('+group_id+', \d+, (\d+), (\d+), \d+, (\d+), \d+, \d+, (\d+), (\d+),', groups_str)
-      #print(grpMatch)
-      
-      if not grpMatch:
-        continue
-      
-      zone_id = grpMatch.group(1)
-      respawn = grpMatch.group(2)
-      drop_id = grpMatch.group(3)
-      lvl_min = grpMatch.group(4)
-      lvl_max = grpMatch.group(5)
-      
-      if count % 1000 == 0: print(count, 'mob:', mob_id, mob_name, mob_iname, zone_id, drop_id, respawn, lvl_min, lvl_max)
-      
-      yield (mob_id, mob_name, mob_iname, zone_id, drop_id, respawn, lvl_min, lvl_max)
-'''
-
 cur.executemany('INSERT INTO mobs (mob_id, mob_name, mob_iname, zone_id, drop_id, respawn, lvl_min, lvl_max) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', mob_generator())
 
 con.commit()
@@ -142,28 +99,6 @@ def drop_generator():
     if count % 1000 == 0: print(count, 'drop:', row['dropId'], row['dropType'], row['itemId'], row['itemRate'])
     
     yield (row['dropId'], row['dropType'], row['itemId'], row['itemRate'])
-    
-'''
-def drop_generator2():
-  count = 0
-  with open('sql/mob_droplist.sql') as file:
-    dropPattern = re.compile('VALUES \((\d+), (\d+), [^,]+, [^,]+, (\d+), (\d+)\)')
-    
-    for line in file.readlines():
-      dropMatch = dropPattern.search(line)
-      if not dropMatch: continue
-      
-      count += 1
-      
-      drop_id = dropMatch.group(1)
-      drop_type = dropMatch.group(2)
-      item_id = dropMatch.group(3)
-      item_rate = dropMatch.group(4)
-      
-      if count % 1000 == 0: print(count, 'drop:', drop_id, drop_type, item_id, item_rate)
-      
-      yield (drop_id, drop_type, item_id, item_rate)
-'''
 
 cur.executemany('INSERT INTO drops (drop_id, drop_type, item_id, item_rate) VALUES (?, ?, ?, ?)', drop_generator())
 
