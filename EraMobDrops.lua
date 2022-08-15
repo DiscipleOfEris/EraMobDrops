@@ -505,17 +505,6 @@ function applyTH(item_rate)
   return math.min(math.floor(rate*1000),1000)
 end
 
-function calculateGroupedRate(drop, drops)
-  totalRate = 0
-  for i, drop2 in pairs(drops) do
-    if testflag(drop2.drop_type, DROP_TYPE.GROUPED) then
-      totalRate = totalRate + drop2.item_rate
-    end
-  end
-  
-  return drop.item_rate / totalRate * 1000
-end
-
 function setTH(newTH)
   TH_lvl = newTH
   
