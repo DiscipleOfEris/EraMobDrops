@@ -1,6 +1,6 @@
 _addon.name = 'EraMobDrops'
 _addon.author = 'DiscipleOfEris'
-_addon.version = '1.5.0'
+_addon.version = '1.6.0'
 _addon.commands = {'mobdrops', 'drops'}
 
 config = require('config')
