@@ -12,7 +12,7 @@ require('logger')
 require('sqlite3')
 
 defaults = {}
-defaults.header = "${name} (TH: ${TH})"
+defaults.header = "${mob_name} (TH: ${TH})"
 defaults.subheader = "(Lv.${lvl}, Respawn: ${respawn})"
 defaults.footer = ""
 defaults.noDrops = "No Drops"
@@ -48,7 +48,7 @@ zones = res.zones
 items = res.items
 
 local mobKeys = {'mob_id', 'name', 'iname', 'zone_id', 'drop_id', 'respawn', 'lvl_min', 'lvl_max'}
-local dropKeys = {'drop_id', 'drop_type', 'item_id', 'item_rate'}
+local dropKeys = {'drop_id', 'drop_type', 'group_id', 'group_rate', 'item_id', 'item_rate'}
 
 DROP_TYPE = { NORMAL=0x0, GROUPED=0x1, STEAL=0x2, DESPOIL=0x4 }
 
@@ -175,15 +175,15 @@ windower.register_event('addon command', function(command, ...)
       mob.lvl = getLevelStr(mob)
       
       found = false
-      for _, row in pairs(mobsProcessed) do
-        if row.zone_id == mob.zone_id and row.name == mob.name and row.drops == mob.drops and row.lvl == mob.lvl then
+      for _, mobProcessed in pairs(mobsProcessed) do
+        if mobProcessed.zone_id == mob.zone_id and mobProcessed.mob_name == mob.mob_name and mobProcessed.drops == mob.drops and mobProcessed.lvl == mob.lvl then
           found = true
-          row.count = row.count + 1
+          mobProcessed.count = mobProcessed.count + 1
           break
         end
       end
       if not found then
-        mobsProcessed:insert({zone_id=mob.zone_id, name=mob.name, drops=mob.drops, lvl=mob.lvl, count=1})
+        mobsProcessed:insert({zone_id=mob.zone_id, mob_name=mob.mob_name, drops=mob.drops, lvl=mob.lvl, count=1})
       end
     end
     
@@ -191,8 +191,8 @@ windower.register_event('addon command', function(command, ...)
       return a.zone_id < b.zone_id
     end)
     
-    for _, mob in pairs(mobsProcessed) do
-      log('%s: %s %s (Lv.%s): %s':format(zones[mob.zone_id].en, mob.count, mob.name, mob.lvl, mob.drops))
+    for _, mobProcessed in pairs(mobsProcessed) do
+      log('%s: %s %s (Lv.%s): %s':format(zones[mobProcessed.zone_id].en, mobProcessed.count, mobProcessed.mob_name, mobProcessed.lvl, mobProcessed.drops))
     end
   elseif command == "mob" then
     local name = strip(windower.convert_auto_trans(args:concat(' ')))
@@ -205,14 +205,14 @@ windower.register_event('addon command', function(command, ...)
       
       local found = false
       for _, row in ipairs(mobsProcessed) do
-        if row.zone_id == mob.zone_id and row.name == mob.name and row.drop_id == mob.drop_id and row.lvl == mob.lvl then
+        if row.zone_id == mob.zone_id and row.mob_name == mob.mob_name and row.drop_id == mob.drop_id and row.lvl == mob.lvl then
           found = true
           row.count = row.count + 1
           break
         end
       end
       if not found then
-        mobsProcessed:insert({name=mob.name, zone_id=mob.zone_id, drop_id=mob.drop_id, lvl=mob.lvl, count=1})
+        mobsProcessed:insert({name=mob.mob_name, zone_id=mob.zone_id, drop_id=mob.drop_id, lvl=mob.lvl, count=1})
         if not drop_ids:contains(mob.drop_id) then drop_ids:insert(mob.drop_id) end
       end
     end
@@ -242,7 +242,7 @@ windower.register_event('addon command', function(command, ...)
     if #mobsProcessed == 0 then
       log('No mobs found with that name.')
     else
-      log('Results for %s:':format(mobsProcessed[1].name))
+      log('Results for %s:':format(mobsProcessed[1].mob_name))
     end
     
     for _, mob in ipairs(mobsProcessed) do
@@ -285,9 +285,10 @@ function getMobInfo(target, zone_id)
   local drops = {}
   
   local idQuery = 'SELECT * FROM mobs WHERE mob_id='..target.id..''
-  for mobRow in db:rows(idQuery) do
-    mob = kvZip(mobKeys, mobRow)
+  for mobRow in db:nrows(idQuery) do
+    mob = mobRow
     drops = dbGetDrops(mob.drop_id)
+    break
   end
   
   return mob, drops
@@ -302,24 +303,35 @@ function updateInfo(info)
   end
   
   local mob = (info and info.mob) and info.mob or {}
-  local steal = T{}
+  local steal_lines = T{}
   local lines = T{}
   local drops = info and info.drops or {}
-  for _, drop in pairs(drops) do
-    if testflag(drop.drop_type, DROP_TYPE.STEAL) then
-      steal:insert('Steal: '..items[drop.item_id].en)
-    elseif testflag(drop.drop_type, DROP_TYPE.GROUPED) then
-      rate = calculateGroupedRate(drop, drops)
-      lines:insert('1: '..items[drop.item_id].en..string.format(': %.1f%%', rate/10))
-    else
-      rate = applyTH(drop.item_rate)
-      lines:insert(items[drop.item_id].en..string.format(': %.1f%%', rate/10))
+  
+  for _, steal in ipairs(drops.steals) do
+    steal_lines:insert(items[steal.item_id].en..': Steal')
+  end
+  
+  for i, group in ipairs(drops.groups) do
+    if group.group_rate > 0 then
+      for _, item in ipairs(group.items) do
+        if item.item_rate > 0 then
+          rate = applyTH(group.group_rate) * item.item_rate / 1000
+          lines:insert(i..': '..items[item.item_id].en..string.format(': %.1f%%', rate / 10))
+        end
+      end
+    end
+  end
+  
+  for _, item in ipairs(drops.items) do
+    if item.item_rate > 0 then
+      rate = applyTH(item.item_rate)
+      lines:insert(items[item.item_id].en..string.format(': %.1f%%', rate / 10))
     end
   end
   
   local str = ""
   
-  lines = steal:extend(lines)
+  lines = steal_lines:extend(lines)
   dropCount = #lines
   maxWidth = math.max(1, --[[#settings.header, #settings.subheader, #settings.footer, ]]table.reduce(lines, function(a, b)
     if type(a) == 'number' then return math.max(a, #b)
@@ -362,6 +374,7 @@ function updateInfo(info)
   
   lvl = mob.lvl_min and getLevelStr(mob) or '?'
   update = table.update({TH=TH_lvl, lvl=lvl}, mob)
+  update.name = update.mob_name
   update.respawn = update.respawn and (update.respawn / 60) or 0
   if update.respawn > 60 then
     update.respawn = string.format('%.1fh', update.respawn/60)
@@ -375,29 +388,91 @@ end
 
 function dbGetDrops(drop_id)
   local query = 'SELECT * FROM drops WHERE drop_id='..drop_id
-  drops = {}
-  for row in db:rows(query) do
-    table.insert(drops, kvZip(dropKeys, row))
+  local drops = {steals={}, items={}, groups={}}
+  for row in db:nrows(query) do
+    if row.drop_type == 1 then
+      while row.group_id > #drops.groups do
+        table.insert(drops.groups, {group_rate=1000, items={}})
+      end
+      local group = drops.groups[row.group_id]
+      
+      group.group_rate = row.group_rate
+      table.insert(group.items, row)
+    elseif row.drop_type == 0 then
+      table.insert(drops.items, row)
+    elseif row.drop_type == 2 then
+      table.insert(drops.steals, row)
+    end
   end
   
+  -- Normalize group item_rates so they don't always need to sum to 1000.
+  for _, group in ipairs(drops.groups) do
+    local total_rate = 0
+    for _, item in ipairs(group.items) do
+      total_rate = total_rate + item.item_rate
+    end
+    
+    for _, item in ipairs(group.items) do
+      if item.item_rate > 0 then
+        item.item_rate = item.item_rate * (1000 / total_rate)
+      end
+    end
+  end
   return drops
 end
 
 function dbGetDropsWithItem(item_id)
   local query = 'SELECT * FROM drops WHERE item_id='..item_id
-  drops = {}
-  for row in db:rows(query) do
-    table.insert(drops, kvZip(dropKeys, row))
+  local drops = {}
+  for row in db:nrows(query) do
+    if row.drop_type == 2 then
+      local group = dbGetDropGroup(row.drop_id, row.group_id, false)
+      
+      local total_rate = 0
+      for _, item in ipairs(group.items) do
+        total_rate = total_rate + item.item_rate
+      end
+      
+      if row.item_rate > 0 then
+        row.item_rate = row.item_rate * (1000 / total_rate)
+      end
+    end
+    table.insert(drops, row)
   end
   
   return drops
 end
 
+function dbGetDropGroup(drop_id, group_id, normalize)
+  local query = 'SELECT * FROM drops WHERE drop_id='..drop_id..' AND group_id='..group_id
+  local group = {group_rate=1000, items={}}
+  for row in db:nrows(query) do
+    group.group_rate = row.group_rate
+    table.insert(group.items, row)
+  end
+  
+  if not normalize then return group end
+  
+  -- Normalize group item_rates so they don't always need to sum to 1000.
+  local total_rate = 0
+  for i, item in ipairs(group.items) do
+    total_rate = total_rate + item.item_rate
+  end
+  
+  for _, item in ipairs(group.items) do
+    if item.item_rate > 0 then
+      item.item_rate = item.item_rate * (1000 / total_rate)
+    end
+  end
+  
+  return group
+end
+
 function dbGetMobsWithDrops(drop_ids)
   local query = 'SELECT * FROM mobs WHERE drop_id IN ('..table.concat(drop_ids, ',')..')'
   mobs = {}
-  for row in db:rows(query) do
-    table.insert(mobs, kvZip(mobKeys, row))
+  for row in db:nrows(query) do
+    table.insert(mobs, row)
   end
   
   return mobs
@@ -407,8 +482,8 @@ function dbGetMobsWithName(name)
   name = strip(name)
   local query = 'SELECT * FROM mobs WHERE mob_iname="'..name..'" ORDER BY zone_id, drop_id'
   local mobs = {}
-  for row in db:rows(query) do
-    table.insert(mobs, kvZip(mobKeys, row))
+  for row in db:nrows(query) do
+    table.insert(mobs, row)
   end
   
   return mobs

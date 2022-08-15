@@ -32,6 +32,8 @@ DROP INDEX IF EXISTS idx_drops_itemid;
 CREATE TABLE drops (
   drop_id INTEGER,
   drop_type INTEGER,
+  group_id INTEGER,
+  group_rate INTEGER,
   item_id INTEGER,
   item_rate INTEGER);
 CREATE INDEX idx_drops_dropid ON drops(drop_id);
@@ -98,8 +100,8 @@ def drop_generator():
     
     if count % 1000 == 0: print(count, 'drop:', row['dropId'], row['dropType'], row['itemId'], row['itemRate'])
     
-    yield (row['dropId'], row['dropType'], row['itemId'], row['itemRate'])
+    yield (row['dropId'], row['dropType'], row['groupId'], row['groupRate'], row['itemId'], row['itemRate'])
 
-cur.executemany('INSERT INTO drops (drop_id, drop_type, item_id, item_rate) VALUES (?, ?, ?, ?)', drop_generator())
+cur.executemany('INSERT INTO drops (drop_id, drop_type, group_id, group_rate, item_id, item_rate) VALUES (?, ?, ?, ?, ?, ?)', drop_generator())
 
 con.commit()
